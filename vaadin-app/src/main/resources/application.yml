@@ -1,0 +1,27 @@
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            client-id: vaadin-client
+            client-secret: secret123
+            provider: keycloak
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: openid,profile,email
+        provider:
+          keycloak:
+            issuer-uri: http://localhost:8081/realms/demo-realm
+
+# Keycloak configuration
+keycloak:
+  base-url: http://localhost:8081
+  realm: demo-realm
+
+# External services configuration
+roles:
+  service-url: http://localhost:8091/api/roles
+
+server:
+  port: 8080
