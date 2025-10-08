@@ -1,6 +1,5 @@
 package com.example.vaadin;
 
-import com.example.common.dto.FunctionalityDTO;
 import com.example.common.dto.RoleDTO;
 import com.example.common.dto.RoleTableDTO;
 import com.example.common.dto.UserRolesDTO;
@@ -15,10 +14,11 @@ import com.vaadin.flow.component.html.H3;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
-import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.data.renderer.ComponentRenderer;
+import com.vaadin.flow.router.BeforeEnterEvent;
+import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.auth.AnonymousAllowed;
 import com.vaadin.flow.spring.security.AuthenticationContext;
@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 
 @Route("")
 @AnonymousAllowed
-public class RoleView extends VerticalLayout {
+public class RoleView extends VerticalLayout implements BeforeEnterObserver {
 
     private final RolesService rolesService;
     private final AuthenticationContext authenticationContext;
@@ -43,7 +43,40 @@ public class RoleView extends VerticalLayout {
         this.rolesService = rolesService;
         this.authenticationContext = authenticationContext;
         this.activeRoleService = activeRoleService;
+    }
+
+    @Override
+    public void beforeEnter(BeforeEnterEvent event) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         
+        // Se l'utente è autenticato, controlla se ha un solo ruolo
+        if (auth != null && auth.isAuthenticated() && 
+            auth instanceof OAuth2AuthenticationToken oauthToken) {
+            
+            try {
+                UserRolesDTO response = rolesService.getUserRolesAndFunctionalities();
+                
+                if (response != null && response.getRoles() != null && response.getRoles().size() == 1) {
+                    // L'utente ha un solo ruolo - imposta automaticamente e naviga a MainView
+                    RoleDTO singleRole = response.getRoles().get(0);
+                    activeRoleService.setActiveRole(singleRole.getName(), singleRole.getDescription());
+                    
+                    // Naviga direttamente alla pagina di conferma
+                    String parameter = singleRole.getName() + "|" + singleRole.getDescription();
+                    event.forwardTo("role-confirmation/" + parameter);
+                    return;
+                }
+            } catch (Exception e) {
+                // In caso di errore, continua normalmente e mostra la pagina
+                e.printStackTrace();
+            }
+        }
+        
+        // Renderizza la pagina normalmente
+        initializeView();
+    }
+    
+    private void initializeView() {
         setSizeFull();
         setDefaultHorizontalComponentAlignment(Alignment.CENTER);
         
@@ -185,7 +218,7 @@ public class RoleView extends VerticalLayout {
             .set("text-align", "center")
             .set("padding", "var(--lumo-space-l)");
         
-        Button loadRolesBtn = new Button("Carica Ruoli", VaadinIcon.REFRESH.create());
+        Button loadRolesBtn = new Button("Ricarica Ruoli", VaadinIcon.REFRESH.create());
         loadRolesBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         loadRolesBtn.addClickListener(e -> loadUserRolesTable(grid, noDataMessage));
         
@@ -197,6 +230,9 @@ public class RoleView extends VerticalLayout {
         rolesCard.add(rolesTitle, noDataMessage, grid, buttonLayout);
         
         add(welcomeCard, rolesCard);
+        
+        // Carica automaticamente i ruoli all'avvio
+        loadUserRolesTable(grid, noDataMessage);
     }
     
     private void createLoginView() {
@@ -289,31 +325,6 @@ public class RoleView extends VerticalLayout {
             Notification.show("❌ Errore imprevisto: " + e.getMessage(), 5000, 
                 Notification.Position.TOP_CENTER);
             e.printStackTrace();
-        }
-    }
-    
-    private void loadUserRoles(TextArea rolesArea) {
-        try {
-            List<String> roles = rolesService.getUserRoles();
-            if (roles.isEmpty()) {
-                rolesArea.setValue("Nessun ruolo assegnato");
-            } else if (roles.contains("ERROR_LOADING_ROLES")) {
-                rolesArea.setValue("❌ Errore nel caricamento dei ruoli");
-                Notification.show("Errore di connessione al servizio ruoli", 3000, 
-                    Notification.Position.TOP_CENTER);
-            } else if (roles.contains("NO_TOKEN")) {
-                rolesArea.setValue("❌ Token di accesso non disponibile");
-                Notification.show("Token OAuth2 non trovato", 3000, 
-                    Notification.Position.TOP_CENTER);
-            } else {
-                rolesArea.setValue("✅ Ruoli: " + String.join(", ", roles));
-                Notification.show("Ruoli caricati con successo!", 2000, 
-                    Notification.Position.TOP_CENTER);
-            }
-        } catch (Exception e) {
-            rolesArea.setValue("❌ Errore imprevisto: " + e.getMessage());
-            Notification.show("Errore imprevisto nel caricamento dei ruoli", 3000, 
-                Notification.Position.TOP_CENTER);
         }
     }
 }
