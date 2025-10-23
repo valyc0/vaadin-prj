@@ -222,11 +222,17 @@ public class RoleView extends VerticalLayout implements BeforeEnterObserver {
         loadRolesBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         loadRolesBtn.addClickListener(e -> loadUserRolesTable(grid, noDataMessage));
         
+        Button fileUploadBtn = new Button("Upload File", VaadinIcon.UPLOAD.create());
+        fileUploadBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS);
+        fileUploadBtn.addClickListener(e -> 
+            getUI().ifPresent(ui -> ui.navigate("file-upload"))
+        );
+        
         Button logoutBtn = new Button("Logout", VaadinIcon.SIGN_OUT.create());
         logoutBtn.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
         logoutBtn.addClickListener(e -> authenticationContext.logout());
         
-        HorizontalLayout buttonLayout = new HorizontalLayout(loadRolesBtn, logoutBtn);
+        HorizontalLayout buttonLayout = new HorizontalLayout(loadRolesBtn, fileUploadBtn, logoutBtn);
         rolesCard.add(rolesTitle, noDataMessage, grid, buttonLayout);
         
         add(welcomeCard, rolesCard);

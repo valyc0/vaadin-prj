@@ -32,6 +32,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers(AntPathRequestMatcher.antMatcher(HttpMethod.GET, "/api/roles/**")).authenticated()
+                .requestMatchers(AntPathRequestMatcher.antMatcher("/api/files/**")).permitAll() // Allow file uploads for testing
                 .requestMatchers(AntPathRequestMatcher.antMatcher("/h2-console/**")).permitAll()
                 .requestMatchers(AntPathRequestMatcher.antMatcher("/actuator/health")).permitAll()
                 .requestMatchers(AntPathRequestMatcher.antMatcher("/swagger-ui/**")).permitAll()

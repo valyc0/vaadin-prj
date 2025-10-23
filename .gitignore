@@ -67,3 +67,6 @@ logs/
 *.zip
 *.tar.gz
 *.rar
+
+# MinIO data directory
+minio/data/
