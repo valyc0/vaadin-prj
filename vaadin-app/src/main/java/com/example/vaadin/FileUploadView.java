@@ -1,6 +1,7 @@
 package com.example.vaadin;
 
 import com.example.vaadin.service.FileStreamingService;
+import com.example.vaadin.upload.StreamingReceiver;
 import com.vaadin.flow.component.ComponentEvent;
 import com.vaadin.flow.component.ComponentEventListener;
 import com.vaadin.flow.component.UI;
@@ -15,7 +16,6 @@ import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.progressbar.ProgressBar;
 import com.vaadin.flow.component.upload.Upload;
-import com.vaadin.flow.component.upload.receivers.MemoryBuffer;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.auth.AnonymousAllowed;
@@ -23,22 +23,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
+import java.io.PipedInputStream;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Vaadin View for streaming large file uploads
  * 
- * This view demonstrates true streaming upload:
- * - No file loaded into memory
- * - No temporary files on disk
+ * This view implements TRUE streaming upload with ZERO memory buffering:
+ * - NO file loaded into memory (uses PipedStreams)
+ * - NO temporary files on disk
  * - Direct streaming from browser to roles-service to MinIO
+ * - Data flows immediately as it arrives (8KB pipe buffer only)
  * - Progress tracking in real-time
  * - Suitable for very large files (30GB+)
  * 
- * Architecture:
- * Browser → Vaadin Upload → InputStream → WebFlux Flux<DataBuffer> → 
- * → HTTP Stream → Roles-Service → MinIO
+ * Architecture (TRUE STREAMING):
+ * Browser → Vaadin Upload → PipedOutputStream → PipedInputStream → 
+ * → WebFlux Flux<DataBuffer> → HTTP Stream → Roles-Service → MinIO
+ * 
+ * Key: Uses custom StreamingReceiver instead of MemoryBuffer to avoid
+ * loading entire file into memory before streaming.
  */
 @Route("file-upload")
 @PageTitle("Streaming File Upload")
@@ -126,20 +131,6 @@ public class FileUploadView extends VerticalLayout {
 
         H3 uploadTitle = new H3("📤 Upload File");
 
-        // Create upload component with streaming receiver
-        MemoryBuffer buffer = new MemoryBuffer();
-        Upload upload = new Upload(buffer);
-        
-        upload.setMaxFiles(1);
-        upload.setDropAllowed(true);
-        // Don't set acceptedFileTypes to accept all file types (avoid regex issues)
-        upload.setAutoUpload(true); // Enable auto-upload when file is selected
-        
-        // Customize upload button
-        upload.setUploadButton(new Button("Choose File..."));
-        upload.getElement().getStyle()
-                .set("width", "100%");
-
         // Progress indicators
         progressBar = new ProgressBar();
         progressBar.setMin(0);
@@ -156,107 +147,125 @@ public class FileUploadView extends VerticalLayout {
         Div progressContainer = new Div(progressBar, progressLabel);
         progressContainer.getStyle().set("width", "100%");
 
-        // Upload success listener
-        upload.addSucceededListener(event -> {
-            String fileName = event.getFileName();
-            String mimeType = event.getMIMEType();
+        // Create TRUE STREAMING receiver - NO memory buffering!
+        // Use array to hold receiver reference for use inside lambda
+        final StreamingReceiver[] receiverHolder = new StreamingReceiver[1];
+        
+        receiverHolder[0] = new StreamingReceiver((fileName, inputStream) -> {
+            // This callback is invoked IMMEDIATELY when upload starts
+            // The inputStream will provide data as it arrives from the browser
+            // NO buffering happens - data flows directly!
             
             logger.info("═══════════════════════════════════════════════════════════════════════════════");
-            logger.info("📥 UPLOAD EVENT RECEIVED IN VAADIN VIEW");
+            logger.info("📥 STREAMING STARTED IN VAADIN VIEW");
             logger.info("   Filename: {}", fileName);
-            logger.info("   MIME Type: {}", mimeType);
-            logger.info("   Size: {} bytes", event.getContentLength());
+            logger.info("   Mode: TRUE STREAMING (zero buffering)");
             logger.info("═══════════════════════════════════════════════════════════════════════════════");
 
-            progressBar.setVisible(true);
-            progressLabel.setText("Streaming to server...");
-            uploadStatusDiv.setVisible(true);
-
-            try {
-                // Get InputStream directly from buffer
-                // This stream contains the uploaded file data
-                InputStream inputStream = buffer.getInputStream();
-                
-                logger.info("✓ InputStream obtained from Vaadin Upload component");
-                logger.info("⚡ Starting WebFlux reactive streaming to roles-service...");
-
-                // Stream file using WebFlux reactive streams
-                // This will stream data directly without loading into memory
-                fileStreamingService.uploadFileStreaming(
-                        fileName,
-                        inputStream,
-                        mimeType,
-                        bytesUploaded -> {
-                            // Progress callback - update UI
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    progressLabel.setText(String.format(
-                                            "Uploaded: %s", 
-                                            formatBytes(bytesUploaded)
-                                    ));
-                                });
-                            }
-                        }
-                ).subscribe(
-                        response -> {
-                            // Success callback
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    progressBar.setVisible(false);
-                                    progressLabel.setText("Upload completed!");
-                                    
-                                    String storedFileName = (String) response.get("storedFileName");
-                                    String formattedSize = (String) response.get("formattedSize");
-                                    String throughput = (String) response.get("throughputMBps");
-                                    
-                                    Notification.show(
-                                            String.format("✅ File uploaded successfully!\n" +
-                                                    "Stored as: %s\n" +
-                                                    "Size: %s\n" +
-                                                    "Throughput: %s MB/s",
-                                                    storedFileName, formattedSize, throughput),
-                                            5000,
-                                            Notification.Position.TOP_CENTER
-                                    ).addThemeVariants(NotificationVariant.LUMO_SUCCESS);
-                                    
-                                    refreshFilesList();
-                                    uploadStatusDiv.setVisible(false);
-                                });
-                            }
-                        },
-                        error -> {
-                            // Error callback
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    progressBar.setVisible(false);
-                                    progressLabel.setText("Upload failed!");
-                                    
-                                    Notification.show(
-                                            "❌ Upload failed: " + error.getMessage(),
-                                            5000,
-                                            Notification.Position.MIDDLE
-                                    ).addThemeVariants(NotificationVariant.LUMO_ERROR);
-                                    
-                                    uploadStatusDiv.setVisible(false);
-                                });
-                            }
-                        }
-                );
-
-            } catch (Exception e) {
-                logger.error("Error during upload initiation", e);
-                Notification.show(
-                        "❌ Error: " + e.getMessage(),
-                        5000,
-                        Notification.Position.MIDDLE
-                ).addThemeVariants(NotificationVariant.LUMO_ERROR);
-                
-                progressBar.setVisible(false);
-                uploadStatusDiv.setVisible(false);
+            UI ui = getUI().orElse(null);
+            if (ui != null) {
+                ui.access(() -> {
+                    progressBar.setVisible(true);
+                    progressLabel.setText("Streaming to server...");
+                    uploadStatusDiv.setVisible(true);
+                });
             }
+
+            String mimeType = receiverHolder[0].getCurrentMimeType();
+            
+            logger.info("⚡ Starting WebFlux reactive streaming to roles-service...");
+
+            // Stream file using WebFlux reactive streams
+            // This will stream data directly as it arrives - NO buffering
+            fileStreamingService.uploadFileStreaming(
+                    fileName,
+                    inputStream,
+                    mimeType,
+                    bytesUploaded -> {
+                        // Progress callback - update UI
+                        if (ui != null) {
+                            ui.access(() -> {
+                                progressLabel.setText(String.format(
+                                        "Uploaded: %s", 
+                                        formatBytes(bytesUploaded)
+                                ));
+                            });
+                        }
+                    }
+            ).subscribe(
+                    response -> {
+                        // Success callback
+                        if (ui != null) {
+                            ui.access(() -> {
+                                progressBar.setVisible(false);
+                                progressLabel.setText("Upload completed!");
+                                
+                                String storedFileName = (String) response.get("storedFileName");
+                                String formattedSize = (String) response.get("formattedSize");
+                                String throughput = (String) response.get("throughputMBps");
+                                
+                                Notification.show(
+                                        String.format("✅ File uploaded successfully!\n" +
+                                                "Stored as: %s\n" +
+                                                "Size: %s\n" +
+                                                "Throughput: %s MB/s",
+                                                storedFileName, formattedSize, throughput),
+                                        5000,
+                                        Notification.Position.TOP_CENTER
+                                ).addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+                                
+                                refreshFilesList();
+                                uploadStatusDiv.setVisible(false);
+                            });
+                        }
+                        receiverHolder[0].cleanup();
+                    },
+                    error -> {
+                        // Error callback
+                        logger.error("Upload error", error);
+                        if (ui != null) {
+                            ui.access(() -> {
+                                progressBar.setVisible(false);
+                                progressLabel.setText("Upload failed!");
+                                
+                                Notification.show(
+                                        "❌ Upload failed: " + error.getMessage(),
+                                        5000,
+                                        Notification.Position.MIDDLE
+                                ).addThemeVariants(NotificationVariant.LUMO_ERROR);
+                                
+                                uploadStatusDiv.setVisible(false);
+                            });
+                        }
+                        receiverHolder[0].cleanup();
+                    }
+            );
+        });
+
+        StreamingReceiver receiver = receiverHolder[0];
+
+        // Create upload component with TRUE streaming receiver
+        Upload upload = new Upload(receiver);
+        
+        upload.setMaxFiles(1);
+        upload.setDropAllowed(true);
+        // Don't set acceptedFileTypes to accept all file types (avoid regex issues)
+        upload.setAutoUpload(true); // Enable auto-upload when file is selected
+        
+        // Customize upload button
+        upload.setUploadButton(new Button("Choose File..."));
+        upload.getElement().getStyle()
+                .set("width", "100%");
+
+        // Upload start listener
+        upload.addStartedListener(event -> {
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
+            logger.info("📤 UPLOAD STARTED EVENT");
+            logger.info("   Filename: {}", event.getFileName());
+            logger.info("   MIME Type: {}", event.getMIMEType());
+            logger.info("   Size: {} bytes", event.getContentLength());
+            logger.info("   Mode: STREAMING (NO buffering in memory)");
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
         });
 
         // Upload failed listener
@@ -267,6 +276,12 @@ public class FileUploadView extends VerticalLayout {
                     5000,
                     Notification.Position.MIDDLE
             ).addThemeVariants(NotificationVariant.LUMO_ERROR);
+            receiverHolder[0].cleanup();
+        });
+
+        // Upload finished listener (called after succeeded/failed)
+        upload.addFinishedListener(event -> {
+            logger.info("Upload finished event for: {}", event.getFileName());
         });
 
         uploadStatusDiv.add(progressContainer);
