@@ -9,6 +9,11 @@ import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -41,9 +46,44 @@ public class FileStreamingService {
     private String rolesServiceUrl;
 
     private final WebClient webClient;
+    private final OAuth2AuthorizedClientService authorizedClientService;
 
-    public FileStreamingService(WebClient.Builder webClientBuilder) {
+    public FileStreamingService(WebClient.Builder webClientBuilder, 
+                               OAuth2AuthorizedClientService authorizedClientService) {
         this.webClient = webClientBuilder.build();
+        this.authorizedClientService = authorizedClientService;
+    }
+
+    /**
+     * Get JWT token from current authenticated user
+     */
+    private String getJwtToken() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        
+        if (authentication == null || !authentication.isAuthenticated()) {
+            logger.warn("No authenticated user found");
+            return null;
+        }
+
+        try {
+            OAuth2AuthorizedClient client = authorizedClientService
+                    .loadAuthorizedClient("keycloak", authentication.getName());
+            
+            if (client == null) {
+                logger.warn("No OAuth2 client found for user: {}", authentication.getName());
+                return null;
+            }
+
+            OAuth2AccessToken accessToken = client.getAccessToken();
+            String token = accessToken.getTokenValue();
+            
+            logger.debug("JWT token retrieved for user: {}", authentication.getName());
+            return token;
+            
+        } catch (Exception e) {
+            logger.error("Failed to retrieve access token", e);
+            return null;
+        }
     }
 
     /**
@@ -112,12 +152,25 @@ public class FileStreamingService {
         logger.info("   └──────────────┘        └──────────────┘        └──────────────┘        └───────────┘");
         logger.info("   Reactive streaming - NO blocking, NO memory buffering!");
 
-        // Send streaming request to roles-service
-        @SuppressWarnings("unchecked")
-        Mono<Map<String, Object>> resultMono = (Mono<Map<String, Object>>) (Mono<?>) webClient.post()
+        // Get JWT token
+        String jwtToken = getJwtToken();
+        if (jwtToken != null) {
+            logger.info("🔑 JWT token added to request");
+        }
+
+        // Send streaming request to roles-service with JWT
+        WebClient.RequestHeadersSpec<?> request = webClient.post()
                 .uri(rolesServiceUrl + "/api/files/upload")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(BodyInserters.fromMultipartData(builder.build()))
+                .body(BodyInserters.fromMultipartData(builder.build()));
+        
+        // Add Authorization header if token available
+        if (jwtToken != null) {
+            request = request.header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken);
+        }
+
+        @SuppressWarnings("unchecked")
+        Mono<Map<String, Object>> resultMono = (Mono<Map<String, Object>>) (Mono<?>) request
                 .retrieve()
                 .bodyToMono(Map.class);
         
@@ -189,5 +242,94 @@ public class FileStreamingService {
                 .uri(rolesServiceUrl + "/api/files/" + filename)
                 .retrieve()
                 .bodyToMono(Map.class);
+    }
+
+    /**
+     * Upload chunk to roles-service
+     * 
+     * @param uploadId Unique upload session ID
+     * @param fileName Original filename
+     * @param chunkIndex Index of this chunk
+     * @param totalChunks Total number of chunks
+     * @param chunk Multipart chunk file
+     * @return Response from roles-service
+     */
+    public Mono<Map<String, Object>> uploadChunk(String uploadId, String fileName, int chunkIndex, 
+                                                   int totalChunks, org.springframework.web.multipart.MultipartFile chunk) {
+        try {
+            logger.info("→ Forwarding chunk {}/{} to roles-service", chunkIndex + 1, totalChunks);
+            
+            // Create multipart body for chunk
+            MultipartBodyBuilder builder = new MultipartBodyBuilder();
+            builder.part("chunk", chunk.getResource());
+            builder.part("chunkIndex", chunkIndex);
+            builder.part("totalChunks", totalChunks);
+            builder.part("uploadId", uploadId);
+            builder.part("fileName", fileName);
+
+            // Get JWT token
+            String jwtToken = getJwtToken();
+            
+            WebClient.RequestHeadersSpec<?> request = webClient.post()
+                    .uri(rolesServiceUrl + "/api/files/upload-chunk")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(BodyInserters.fromMultipartData(builder.build()));
+            
+            // Add Authorization header if token available
+            if (jwtToken != null) {
+                request = request.header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken);
+            }
+
+            @SuppressWarnings("unchecked")
+            Mono<Map<String, Object>> resultMono = (Mono<Map<String, Object>>) (Mono<?>) request
+                    .retrieve()
+                    .bodyToMono(Map.class);
+
+            return resultMono
+                    .doOnSuccess(response -> logger.info("✓ Chunk forwarded successfully"))
+                    .doOnError(error -> logger.error("✗ Failed to forward chunk: {}", error.getMessage()));
+
+        } catch (Exception e) {
+            logger.error("Error preparing chunk upload", e);
+            return Mono.error(e);
+        }
+    }
+
+    /**
+     * Finalize chunked upload on roles-service
+     * 
+     * @param uploadId Upload session ID
+     * @param fileName Original filename
+     * @param totalChunks Total number of chunks
+     * @return Final upload response
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<Map<String, Object>> finalizeUpload(String uploadId, String fileName, int totalChunks) {
+        logger.info("→ Finalizing upload on roles-service: {}", uploadId);
+
+        Map<String, Object> requestBody = Map.of(
+                "uploadId", uploadId,
+                "fileName", fileName,
+                "totalChunks", totalChunks
+        );
+
+        // Get JWT token
+        String jwtToken = getJwtToken();
+        
+        WebClient.RequestHeadersSpec<?> request = webClient.post()
+                .uri(rolesServiceUrl + "/api/files/finalize-upload")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(requestBody);
+        
+        // Add Authorization header if token available
+        if (jwtToken != null) {
+            request = request.header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtToken);
+        }
+
+        return (Mono<Map<String, Object>>) (Mono<?>) request
+                .retrieve()
+                .bodyToMono(Map.class)
+                .doOnSuccess(response -> logger.info("✓ Upload finalized successfully"))
+                .doOnError(error -> logger.error("✗ Failed to finalize upload: {}", error.getMessage()));
     }
 }

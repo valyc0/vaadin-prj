@@ -140,11 +140,17 @@ public class MainView extends VerticalLayout implements HasUrlParameter<String> 
                 getUI().ifPresent(ui -> ui.navigate(""))
             );
             
+            Button uploadBtn = new Button("📦 Upload File111", VaadinIcon.UPLOAD.create());
+            uploadBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS);
+            uploadBtn.addClickListener(e -> 
+                getUI().ifPresent(ui -> ui.navigate("chunked-upload"))
+            );
+            
             Button logoutBtn = new Button("Logout", VaadinIcon.SIGN_OUT.create());
             logoutBtn.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
             logoutBtn.addClickListener(e -> authenticationContext.logout());
             
-            HorizontalLayout buttonLayout = new HorizontalLayout(backToRolesBtn, logoutBtn);
+            HorizontalLayout buttonLayout = new HorizontalLayout(backToRolesBtn, uploadBtn, logoutBtn);
             buttonLayout.setJustifyContentMode(JustifyContentMode.CENTER);
             buttonLayout.setSpacing(true);
             

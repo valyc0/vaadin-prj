@@ -1,4 +1,12 @@
 spring:
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50GB
+      max-request-size: 50GB
+      file-size-threshold: 0
+  codec:
+    max-in-memory-size: 10MB
   security:
     oauth2:
       client:
@@ -25,3 +33,10 @@ roles:
 
 server:
   port: 8080
+  tomcat:
+    connection-timeout: 7200000
+    max-http-form-post-size: -1
+    threads:
+      max: 200
+      min-spare: 10
+  max-http-header-size: 102400

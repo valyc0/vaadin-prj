@@ -309,6 +309,152 @@ public class FileStreamingController {
     }
 
     /**
+     * Upload file using direct stream (for browser Streams API)
+     * 
+     * This endpoint accepts raw binary stream from browser Fetch API with streaming body.
+     * The filename is passed via X-Filename header.
+     * 
+     * @param inputStream Raw binary stream from request body
+     * @param filename Filename from X-Filename header
+     * @param contentLength File size from X-Content-Length header
+     * @param request HTTP request for logging
+     * @return ResponseEntity with upload details
+     */
+    @PostMapping(value = "/upload-stream", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    @Operation(
+        summary = "Upload file using direct binary stream",
+        description = "Accepts raw binary stream from browser Fetch API. " +
+                     "Filename must be provided in X-Filename header. " +
+                     "Suitable for browser Streams API uploads."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "File uploaded successfully"),
+        @ApiResponse(responseCode = "400", description = "Bad request - missing filename header"),
+        @ApiResponse(responseCode = "500", description = "Internal server error during upload")
+    })
+    public ResponseEntity<?> uploadStream(
+            InputStream inputStream,
+            @RequestHeader(value = "X-Filename", required = false) String filename,
+            @RequestHeader(value = "X-Content-Length", required = false) Long contentLength,
+            HttpServletRequest request) {
+        
+        long startTime = System.currentTimeMillis();
+        
+        try {
+            // Validate filename
+            if (filename == null || filename.isEmpty()) {
+                logger.warn("Upload stream attempt without X-Filename header");
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing X-Filename header"));
+            }
+            
+            // Decode filename if URL-encoded
+            filename = java.net.URLDecoder.decode(filename, "UTF-8");
+            
+            long fileSize = contentLength != null ? contentLength : -1;
+
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
+            logger.info("📥 STREAM UPLOAD REQUEST RECEIVED (Browser Streams API)");
+            logger.info("   Filename: {}", filename);
+            logger.info("   Size: {} bytes ({})", fileSize, formatFileSize(fileSize));
+            logger.info("   Content-Type: application/octet-stream");
+            logger.info("   Remote address: {}", request.getRemoteAddr());
+            logger.info("   Mode: DIRECT BINARY STREAM (Browser Streams API)");
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
+
+            // Generate unique filename
+            String fileExtension = "";
+            if (filename.contains(".")) {
+                fileExtension = filename.substring(filename.lastIndexOf("."));
+            }
+            String uniqueFileName = UUID.randomUUID().toString() + fileExtension;
+
+            logger.info("🔧 Generated unique filename: {}", uniqueFileName);
+            logger.info("🌊 Receiving direct binary stream from browser...");
+            logger.info("⚡ Streaming directly to MinIO (NO buffering)...");
+
+            // Determine content type
+            String contentType = determineContentType(filename);
+
+            // Stream directly to MinIO
+            String storedFileName = minioService.uploadFileStreaming(
+                    uniqueFileName,
+                    inputStream,
+                    contentType,
+                    fileSize
+            );
+
+            long duration = System.currentTimeMillis() - startTime;
+            double throughputMBps = fileSize > 0 ? (fileSize / (1024.0 * 1024.0) / (duration / 1000.0)) : 0;
+
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
+            logger.info("✅ STREAM UPLOAD COMPLETED SUCCESSFULLY");
+            logger.info("   Stored as: {}", storedFileName);
+            logger.info("   Total duration: {} ms ({} seconds)", duration, String.format("%.2f", duration / 1000.0));
+            if (throughputMBps > 0) {
+                logger.info("   Average throughput: {} MB/s", String.format("%.2f", throughputMBps));
+            }
+            logger.info("═══════════════════════════════════════════════════════════════════════════════");
+
+            FileUploadResponse response = new FileUploadResponse(
+                    storedFileName,
+                    filename,
+                    fileSize > 0 ? fileSize : 0,
+                    fileSize > 0 ? formatFileSize(fileSize) : "unknown",
+                    contentType,
+                    throughputMBps > 0 ? String.format("%.2f", throughputMBps) : "N/A",
+                    duration
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTime;
+            logger.error("═══════════════════════════════════════════════════════════════════════════════");
+            logger.error("❌ STREAM UPLOAD FAILED");
+            logger.error("   Duration before error: {} ms", duration);
+            logger.error("   Error message: {}", e.getMessage());
+            logger.error("═══════════════════════════════════════════════════════════════════════════════", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Upload failed: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Determine content type from filename
+     */
+    private String determineContentType(String filename) {
+        if (filename == null) return "application/octet-stream";
+        
+        String extension = "";
+        if (filename.contains(".")) {
+            extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+        }
+        
+        return switch (extension) {
+            case "pdf" -> "application/pdf";
+            case "zip" -> "application/zip";
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "png" -> "image/png";
+            case "gif" -> "image/gif";
+            case "mp4" -> "video/mp4";
+            case "avi" -> "video/x-msvideo";
+            case "mov" -> "video/quicktime";
+            case "mp3" -> "audio/mpeg";
+            case "wav" -> "audio/wav";
+            case "txt" -> "text/plain";
+            case "csv" -> "text/csv";
+            case "json" -> "application/json";
+            case "xml" -> "application/xml";
+            case "doc" -> "application/msword";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xls" -> "application/vnd.ms-excel";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            default -> "application/octet-stream";
+        };
+    }
+
+    /**
      * Delete a file from MinIO
      * 
      * @param filename Name of the file to delete

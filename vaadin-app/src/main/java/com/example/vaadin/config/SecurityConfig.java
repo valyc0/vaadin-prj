@@ -33,7 +33,14 @@ public class SecurityConfig extends VaadinWebSecurity {
 
     @Override
     protected void configure(HttpSecurity http) throws Exception {
-        // Configure exceptions for Vaadin static resources
+        // Disable CSRF for API endpoints (REST API calls from JavaScript)
+        http.csrf(csrf -> csrf
+            .ignoringRequestMatchers(
+                new AntPathRequestMatcher("/api/upload/**")
+            )
+        );
+        
+        // Configure exceptions for Vaadin static resources only
         http.authorizeHttpRequests(auth -> 
             auth.requestMatchers(
                 new AntPathRequestMatcher("/images/*.png"),
