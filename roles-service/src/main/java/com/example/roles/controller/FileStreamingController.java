@@ -363,14 +363,8 @@ public class FileStreamingController {
             logger.info("   Mode: DIRECT BINARY STREAM (Browser Streams API)");
             logger.info("═══════════════════════════════════════════════════════════════════════════════");
 
-            // Generate unique filename
-            String fileExtension = "";
-            if (filename.contains(".")) {
-                fileExtension = filename.substring(filename.lastIndexOf("."));
-            }
-            String uniqueFileName = UUID.randomUUID().toString() + fileExtension;
-
-            logger.info("🔧 Generated unique filename: {}", uniqueFileName);
+            // Use original filename from X-Filename header
+            logger.info("� Using original filename: {}", filename);
             logger.info("🌊 Receiving direct binary stream from browser...");
             logger.info("⚡ Streaming directly to MinIO (NO buffering)...");
 
@@ -381,9 +375,9 @@ public class FileStreamingController {
             logger.info("📝 Content-Type: {} ({})", contentType, 
                 clientContentType != null ? "from client" : "determined from filename");
 
-            // Stream directly to MinIO
+            // Stream directly to MinIO with original filename
             String storedFileName = minioService.uploadFileStreaming(
-                    uniqueFileName,
+                    filename,  // Use original filename instead of UUID
                     inputStream,
                     contentType,
                     fileSize
