@@ -335,6 +335,7 @@ public class FileStreamingController {
     public ResponseEntity<?> uploadStream(
             InputStream inputStream,
             @RequestHeader(value = "X-Filename", required = false) String filename,
+            @RequestHeader(value = "X-Content-Type", required = false) String clientContentType,
             @RequestHeader(value = "X-Content-Length", required = false) Long contentLength,
             HttpServletRequest request) {
         
@@ -373,8 +374,12 @@ public class FileStreamingController {
             logger.info("🌊 Receiving direct binary stream from browser...");
             logger.info("⚡ Streaming directly to MinIO (NO buffering)...");
 
-            // Determine content type
-            String contentType = determineContentType(filename);
+            // Determine content type - use client-provided if available, otherwise determine from filename
+            String contentType = (clientContentType != null && !clientContentType.isEmpty()) 
+                ? clientContentType 
+                : determineContentType(filename);
+            logger.info("📝 Content-Type: {} ({})", contentType, 
+                clientContentType != null ? "from client" : "determined from filename");
 
             // Stream directly to MinIO
             String storedFileName = minioService.uploadFileStreaming(

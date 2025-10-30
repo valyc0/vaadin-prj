@@ -36,7 +36,8 @@ public class SecurityConfig extends VaadinWebSecurity {
         // Disable CSRF for API endpoints (REST API calls from JavaScript)
         http.csrf(csrf -> csrf
             .ignoringRequestMatchers(
-                new AntPathRequestMatcher("/api/upload/**")
+                new AntPathRequestMatcher("/api/upload/**"),
+                new AntPathRequestMatcher("/api/simple-upload/**")
             )
         );
         

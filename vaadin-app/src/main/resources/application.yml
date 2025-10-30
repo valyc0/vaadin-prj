@@ -40,3 +40,12 @@ server:
       max: 200
       min-spare: 10
   max-http-header-size: 102400
+
+# Logging configuration
+logging:
+  level:
+    com.example.vaadin: INFO
+    com.example.vaadin.config.WebFluxConfig: INFO
+    com.example.vaadin.service.FileStreamingService: INFO
+    reactor.netty.http.client: DEBUG
+    org.springframework.web.reactive.function.client: DEBUG
