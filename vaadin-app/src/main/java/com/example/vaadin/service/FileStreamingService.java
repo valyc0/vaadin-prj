@@ -220,39 +220,52 @@ public class FileStreamingService {
     /**
      * List files from roles-service
      */
-    public Mono<String[]> listFiles() {
-        return Mono.fromCallable(() -> restClient.get()
+    public String[] listFiles() {
+        String jwtToken = getJwtToken();
+        
+        return restClient.get()
                 .uri(rolesServiceUrl + "/api/files/list")
+                .headers(headers -> {
+                    if (jwtToken != null) {
+                        headers.setBearerAuth(jwtToken);
+                    }
+                })
                 .retrieve()
-                .body(String[].class));
+                .body(String[].class);
     }
 
     /**
      * Get file metadata from roles-service
      */
-    @SuppressWarnings("unchecked")
-    public Mono<Map<String, Object>> getFileMetadata(String filename) {
-        return Mono.fromCallable(() -> {
-            Map<String, Object> result = restClient.get()
-                    .uri(rolesServiceUrl + "/api/files/metadata/" + filename)
-                    .retrieve()
-                    .body(Map.class);
-            return (Map<String, Object>) result;
-        });
+    public Map<String, Object> getFileMetadata(String filename) {
+        String jwtToken = getJwtToken();
+        
+        return restClient.get()
+                .uri(rolesServiceUrl + "/api/files/metadata/" + filename)
+                .headers(headers -> {
+                    if (jwtToken != null) {
+                        headers.setBearerAuth(jwtToken);
+                    }
+                })
+                .retrieve()
+                .body(Map.class);
     }
 
     /**
      * Delete file from roles-service
      */
-    @SuppressWarnings("unchecked")
-    public Mono<Map<String, Object>> deleteFile(String filename) {
-        return Mono.fromCallable(() -> {
-            Map<String, Object> result = restClient.delete()
-                    .uri(rolesServiceUrl + "/api/files/" + filename)
-                    .retrieve()
-                    .body(Map.class);
-            return (Map<String, Object>) result;
-        });
+    public Map<String, Object> deleteFile(String filename) {
+        String jwtToken = getJwtToken();
+        
+        return restClient.delete()
+                .uri(rolesServiceUrl + "/api/files/" + filename)
+                .headers(headers -> {
+                    if (jwtToken != null) {
+                        headers.setBearerAuth(jwtToken);
+                    }
+                })
+                .retrieve()
+                .body(Map.class);
     }
 
     /**

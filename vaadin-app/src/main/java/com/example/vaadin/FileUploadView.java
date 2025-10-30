@@ -308,64 +308,61 @@ public class FileUploadView extends VerticalLayout {
     }
 
     private void refreshFilesList() {
-        fileStreamingService.listFiles()
-                .subscribe(
-                        files -> {
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    // Fetch metadata for each file
-                                    java.util.List<FileInfo> fileInfos = new java.util.ArrayList<>();
-                                    for (String filename : files) {
-                                        fileStreamingService.getFileMetadata(filename)
-                                                .subscribe(metadata -> {
-                                                    FileInfo info = new FileInfo();
-                                                    info.setFilename(filename);
-                                                    info.setFormattedSize((String) metadata.get("formattedSize"));
-                                                    info.setContentType((String) metadata.get("contentType"));
-                                                    fileInfos.add(info);
-                                                    
-                                                    ui.access(() -> {
-                                                        filesGrid.setItems(fileInfos);
-                                                    });
-                                                });
-                                    }
-                                });
-                            }
-                        },
-                        error -> logger.error("Error loading files list", error)
-                );
+        try {
+            String[] files = fileStreamingService.listFiles();
+            
+            UI ui = getUI().orElse(null);
+            if (ui != null) {
+                ui.access(() -> {
+                    // Fetch metadata for each file
+                    java.util.List<FileInfo> fileInfos = new java.util.ArrayList<>();
+                    for (String filename : files) {
+                        try {
+                            Map<String, Object> metadata = fileStreamingService.getFileMetadata(filename);
+                            FileInfo info = new FileInfo();
+                            info.setFilename(filename);
+                            info.setFormattedSize((String) metadata.get("formattedSize"));
+                            info.setContentType((String) metadata.get("contentType"));
+                            fileInfos.add(info);
+                        } catch (Exception e) {
+                            logger.error("Error loading metadata for file: {}", filename, e);
+                        }
+                    }
+                    filesGrid.setItems(fileInfos);
+                });
+            }
+        } catch (Exception error) {
+            logger.error("Error loading files list", error);
+        }
     }
 
     private void deleteFile(String filename) {
-        fileStreamingService.deleteFile(filename)
-                .subscribe(
-                        response -> {
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    Notification.show(
-                                            "✅ File deleted successfully",
-                                            3000,
-                                            Notification.Position.TOP_CENTER
-                                    ).addThemeVariants(NotificationVariant.LUMO_SUCCESS);
-                                    refreshFilesList();
-                                });
-                            }
-                        },
-                        error -> {
-                            UI ui = getUI().orElse(null);
-                            if (ui != null) {
-                                ui.access(() -> {
-                                    Notification.show(
-                                            "❌ Delete failed: " + error.getMessage(),
-                                            5000,
-                                            Notification.Position.MIDDLE
-                                    ).addThemeVariants(NotificationVariant.LUMO_ERROR);
-                                });
-                            }
-                        }
-                );
+        try {
+            Map<String, Object> response = fileStreamingService.deleteFile(filename);
+            
+            UI ui = getUI().orElse(null);
+            if (ui != null) {
+                ui.access(() -> {
+                    Notification.show(
+                            "✅ File deleted successfully",
+                            3000,
+                            Notification.Position.TOP_CENTER
+                    ).addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+                    refreshFilesList();
+                });
+            }
+        } catch (Exception error) {
+            UI ui = getUI().orElse(null);
+            if (ui != null) {
+                ui.access(() -> {
+                    Notification.show(
+                            "❌ Delete failed: " + error.getMessage(),
+                            5000,
+                            Notification.Position.MIDDLE
+                    ).addThemeVariants(NotificationVariant.LUMO_ERROR);
+                });
+            }
+        }
     }
 
     private Div createCard() {

@@ -125,6 +125,9 @@ async function uploadFileStreaming(file) {
     const result = await response.json();
     console.log('Response data:', result);
     
+    // Dispatch custom event to notify Vaadin that upload completed
+    window.dispatchEvent(new CustomEvent('uploadSuccess', { detail: result }));
+    
     return result;
 }
 
