@@ -2,10 +2,6 @@ package com.example.vaadin.service;
 
 import com.example.common.dto.UserRolesDTO;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
@@ -14,8 +10,8 @@ import org.springframework.security.oauth2.client.authentication.OAuth2Authentic
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.client.RestClientException;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.List;
 import java.util.Arrays;
@@ -28,13 +24,14 @@ import java.util.Collections;
 public class RolesService {
 
     private final String rolesServiceUrl;
-    private final RestTemplate restTemplate;
+    private final WebClient webClient;
     private final OAuth2AuthorizedClientService authorizedClientService;
 
     public RolesService(@Value("${roles.service-url}") String rolesServiceUrl,
-                       OAuth2AuthorizedClientService authorizedClientService) {
+                       OAuth2AuthorizedClientService authorizedClientService,
+                       WebClient.Builder webClientBuilder) {
         this.rolesServiceUrl = rolesServiceUrl;
-        this.restTemplate = new RestTemplate();
+        this.webClient = webClientBuilder.build();
         this.authorizedClientService = authorizedClientService;
     }
 
@@ -51,22 +48,15 @@ public class RolesService {
                 return null;
             }
             
-            // Create headers with Bearer token
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(accessToken);
-            HttpEntity<String> entity = new HttpEntity<>(headers);
+            // Call roles-service with WebClient
+            return webClient.get()
+                .uri(rolesServiceUrl)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(UserRolesDTO.class)
+                .block();
             
-            // Call roles-service without username in URL (extracted from JWT)
-            ResponseEntity<UserRolesDTO> response = restTemplate.exchange(
-                rolesServiceUrl,
-                HttpMethod.GET,
-                entity,
-                UserRolesDTO.class
-            );
-            
-            return response.getBody();
-            
-        } catch (RestClientException e) {
+        } catch (WebClientResponseException e) {
             System.err.println("Error fetching roles: " + e.getMessage());
             e.printStackTrace();
             return null;
@@ -85,21 +75,16 @@ public class RolesService {
                 return Collections.singletonList("NO_TOKEN");
             }
             
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(accessToken);
-            HttpEntity<String> entity = new HttpEntity<>(headers);
+            String[] roles = webClient.get()
+                .uri(rolesServiceUrl)
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .bodyToMono(String[].class)
+                .block();
             
-            ResponseEntity<String[]> response = restTemplate.exchange(
-                rolesServiceUrl,
-                HttpMethod.GET,
-                entity,
-                String[].class
-            );
-            
-            String[] roles = response.getBody();
             return roles != null ? Arrays.asList(roles) : Collections.emptyList();
             
-        } catch (RestClientException e) {
+        } catch (WebClientResponseException e) {
             System.err.println("Error fetching roles: " + e.getMessage());
             e.printStackTrace();
             return Collections.singletonList("ERROR_LOADING_ROLES");
