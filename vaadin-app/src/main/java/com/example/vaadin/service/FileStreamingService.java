@@ -4,22 +4,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.InputStreamResource;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferUtils;
-import org.springframework.core.io.buffer.DefaultDataBufferFactory;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.client.RestClient;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Flux;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Mono;
 
 import java.io.InputStream;
@@ -47,17 +47,24 @@ public class FileStreamingService {
     @Value("${roles.service.url:http://localhost:8091}")
     private String rolesServiceUrl;
 
-    private final RestClient restClient;
+    private final RestTemplate restTemplate;
     private final OAuth2AuthorizedClientService authorizedClientService;
 
-    public FileStreamingService(RestClient.Builder restClientBuilder, 
-                               OAuth2AuthorizedClientService authorizedClientService) {
+    public FileStreamingService(OAuth2AuthorizedClientService authorizedClientService) {
         logger.info("╔════════════════════════════════════════════════════════════════════════════");
         logger.info("║ INITIALIZING FileStreamingService");
-        logger.info("║ Building RestClient instance");
+        logger.info("║ Building RestTemplate instance for streaming support");
         logger.info("╚════════════════════════════════════════════════════════════════════════════");
-        this.restClient = restClientBuilder.build();
+        
+        // Configure RestTemplate with SimpleClientHttpRequestFactory for streaming
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setBufferRequestBody(false); // CRITICAL: Don't buffer request body!
+        requestFactory.setChunkSize(8192); // 8KB chunks for streaming
+        
+        this.restTemplate = new RestTemplate(requestFactory);
         this.authorizedClientService = authorizedClientService;
+        
+        logger.info("RestTemplate configured with streaming support (no buffering, 8KB chunks)");
         logger.info("FileStreamingService initialized successfully");
     }
 
@@ -140,7 +147,7 @@ public class FileStreamingService {
             logger.info("🔑 JWT token added to request");
         }
 
-        // Use RestClient for synchronous streaming - modern Spring 6.1+ API
+        // Use RestTemplate with streaming support (no buffering)
         return Mono.fromCallable(() -> {
             try {
                 logger.info("→ Sending streaming request to: {}/api/files/upload-stream", rolesServiceUrl);
@@ -152,28 +159,44 @@ public class FileStreamingService {
                     5 * 1024 * 1024  // Log every 5MB
                 );
                 
-                // Wrap in InputStreamResource for streaming
-                InputStreamResource resource = new InputStreamResource(progressStream);
+                // Create InputStreamResource without content length (forces chunked encoding)
+                InputStreamResource resource = new InputStreamResource(progressStream) {
+                    @Override
+                    public long contentLength() {
+                        return -1; // Unknown length -> chunked transfer encoding
+                    }
+                    
+                    @Override
+                    public String getFilename() {
+                        return fileName;
+                    }
+                };
                 
-                logger.info("⏳ Starting upload - data is now streaming...");
+                logger.info("⏳ Starting upload - streaming with chunked transfer encoding (8KB chunks)...");
                 
-                // Send request using RestClient with fluent API
-                Map<String, Object> result = restClient.post()
-                    .uri(rolesServiceUrl + "/api/files/upload-stream")
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header("X-Filename", fileName)
-                    .header("X-Content-Type", contentType != null ? contentType : "application/octet-stream")
-                    .headers(headers -> {
-                        if (jwtToken != null) {
-                            headers.setBearerAuth(jwtToken);
-                        }
-                    })
-                    .body(resource)
-                    .retrieve()
-                    .body(Map.class);
+                // Prepare headers
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+                headers.set("X-Filename", fileName);
+                headers.set("X-Content-Type", contentType != null ? contentType : "application/octet-stream");
+                
+                if (jwtToken != null) {
+                    headers.setBearerAuth(jwtToken);
+                }
+                
+                // Create HTTP entity with resource
+                HttpEntity<InputStreamResource> requestEntity = new HttpEntity<>(resource, headers);
+                
+                // Send request using RestTemplate with streaming
+                ResponseEntity<Map> response = restTemplate.exchange(
+                    rolesServiceUrl + "/api/files/upload-stream",
+                    HttpMethod.POST,
+                    requestEntity,
+                    Map.class
+                );
                 
                 @SuppressWarnings("unchecked")
-                Map<String, Object> typedResult = (Map<String, Object>) result;
+                Map<String, Object> typedResult = (Map<String, Object>) response.getBody();
                 
                 return typedResult;
                 
@@ -223,15 +246,21 @@ public class FileStreamingService {
     public String[] listFiles() {
         String jwtToken = getJwtToken();
         
-        return restClient.get()
-                .uri(rolesServiceUrl + "/api/files/list")
-                .headers(headers -> {
-                    if (jwtToken != null) {
-                        headers.setBearerAuth(jwtToken);
-                    }
-                })
-                .retrieve()
-                .body(String[].class);
+        HttpHeaders headers = new HttpHeaders();
+        if (jwtToken != null) {
+            headers.setBearerAuth(jwtToken);
+        }
+        
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        
+        ResponseEntity<String[]> response = restTemplate.exchange(
+                rolesServiceUrl + "/api/files/list",
+                HttpMethod.GET,
+                entity,
+                String[].class
+        );
+        
+        return response.getBody();
     }
 
     /**
@@ -240,15 +269,23 @@ public class FileStreamingService {
     public Map<String, Object> getFileMetadata(String filename) {
         String jwtToken = getJwtToken();
         
-        return restClient.get()
-                .uri(rolesServiceUrl + "/api/files/metadata/" + filename)
-                .headers(headers -> {
-                    if (jwtToken != null) {
-                        headers.setBearerAuth(jwtToken);
-                    }
-                })
-                .retrieve()
-                .body(Map.class);
+        HttpHeaders headers = new HttpHeaders();
+        if (jwtToken != null) {
+            headers.setBearerAuth(jwtToken);
+        }
+        
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        
+        ResponseEntity<Map> response = restTemplate.exchange(
+                rolesServiceUrl + "/api/files/metadata/" + filename,
+                HttpMethod.GET,
+                entity,
+                Map.class
+        );
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) response.getBody();
+        return result;
     }
 
     /**
@@ -257,15 +294,23 @@ public class FileStreamingService {
     public Map<String, Object> deleteFile(String filename) {
         String jwtToken = getJwtToken();
         
-        return restClient.delete()
-                .uri(rolesServiceUrl + "/api/files/" + filename)
-                .headers(headers -> {
-                    if (jwtToken != null) {
-                        headers.setBearerAuth(jwtToken);
-                    }
-                })
-                .retrieve()
-                .body(Map.class);
+        HttpHeaders headers = new HttpHeaders();
+        if (jwtToken != null) {
+            headers.setBearerAuth(jwtToken);
+        }
+        
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        
+        ResponseEntity<Map> response = restTemplate.exchange(
+                rolesServiceUrl + "/api/files/" + filename,
+                HttpMethod.DELETE,
+                entity,
+                Map.class
+        );
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) response.getBody();
+        return result;
     }
 
     /**
@@ -287,30 +332,33 @@ public class FileStreamingService {
                 // Get JWT token
                 String jwtToken = getJwtToken();
                 
-                // For RestClient with multipart, we need to use MultiValueMap
-                org.springframework.util.LinkedMultiValueMap<String, Object> parts = 
-                    new org.springframework.util.LinkedMultiValueMap<>();
+                // Build multipart body
+                MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
                 parts.add("chunk", chunk.getResource());
                 parts.add("chunkIndex", chunkIndex);
                 parts.add("totalChunks", totalChunks);
                 parts.add("uploadId", uploadId);
                 parts.add("fileName", fileName);
 
-                Map<String, Object> result = restClient.post()
-                        .uri(rolesServiceUrl + "/api/files/upload-chunk")
-                        .contentType(MediaType.MULTIPART_FORM_DATA)
-                        .headers(headers -> {
-                            if (jwtToken != null) {
-                                headers.setBearerAuth(jwtToken);
-                            }
-                        })
-                        .body(parts)
-                        .retrieve()
-                        .body(Map.class);
+                // Prepare headers
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+                if (jwtToken != null) {
+                    headers.setBearerAuth(jwtToken);
+                }
+                
+                HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(parts, headers);
+
+                ResponseEntity<Map> response = restTemplate.exchange(
+                        rolesServiceUrl + "/api/files/upload-chunk",
+                        HttpMethod.POST,
+                        requestEntity,
+                        Map.class
+                );
 
                 logger.info("✓ Chunk forwarded successfully");
                 @SuppressWarnings("unchecked")
-                Map<String, Object> typedResult = (Map<String, Object>) result;
+                Map<String, Object> typedResult = (Map<String, Object>) response.getBody();
                 return typedResult;
 
             } catch (Exception e) {
@@ -328,7 +376,6 @@ public class FileStreamingService {
      * @param totalChunks Total number of chunks
      * @return Final upload response
      */
-    @SuppressWarnings("unchecked")
     public Mono<Map<String, Object>> finalizeUpload(String uploadId, String fileName, int totalChunks) {
         return Mono.fromCallable(() -> {
             try {
@@ -343,20 +390,26 @@ public class FileStreamingService {
                 // Get JWT token
                 String jwtToken = getJwtToken();
                 
-                Map<String, Object> result = restClient.post()
-                        .uri(rolesServiceUrl + "/api/files/finalize-upload")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .headers(headers -> {
-                            if (jwtToken != null) {
-                                headers.setBearerAuth(jwtToken);
-                            }
-                        })
-                        .body(requestBody)
-                        .retrieve()
-                        .body(Map.class);
+                // Prepare headers
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                if (jwtToken != null) {
+                    headers.setBearerAuth(jwtToken);
+                }
+                
+                HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
+                
+                ResponseEntity<Map> response = restTemplate.exchange(
+                        rolesServiceUrl + "/api/files/finalize-upload",
+                        HttpMethod.POST,
+                        requestEntity,
+                        Map.class
+                );
                 
                 logger.info("✓ Upload finalized successfully");
-                return (Map<String, Object>) result;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = (Map<String, Object>) response.getBody();
+                return result;
             } catch (Exception error) {
                 logger.error("✗ Failed to finalize upload: {}", error.getMessage());
                 throw error;
