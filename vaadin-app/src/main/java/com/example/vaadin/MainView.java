@@ -1,5 +1,6 @@
 package com.example.vaadin;
 
+import com.example.vaadin.layout.MainLayout;
 import com.example.vaadin.service.ActiveRoleService;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
@@ -22,7 +23,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
-@Route("role-confirmation")
+@Route(value = "role-confirmation", layout = MainLayout.class)
 @AnonymousAllowed
 public class MainView extends VerticalLayout implements HasUrlParameter<String> {
 
@@ -36,8 +37,8 @@ public class MainView extends VerticalLayout implements HasUrlParameter<String> 
         this.activeRoleService = activeRoleService;
         
         setSizeFull();
-        setDefaultHorizontalComponentAlignment(Alignment.CENTER);
-        setJustifyContentMode(JustifyContentMode.CENTER);
+        setPadding(true);
+        setSpacing(true);
     }
 
     @Override
@@ -61,7 +62,7 @@ public class MainView extends VerticalLayout implements HasUrlParameter<String> 
     private void createView() {
         removeAll(); // Rimuovi componenti esistenti
         
-        // Header
+        // Header della pagina
         H1 title = new H1("✅ Ruolo Selezionato");
         title.getStyle().set("color", "var(--lumo-primary-color)");
         
@@ -140,17 +141,13 @@ public class MainView extends VerticalLayout implements HasUrlParameter<String> 
                 getUI().ifPresent(ui -> ui.navigate(""))
             );
             
-            Button uploadBtn = new Button("📦 Upload File111", VaadinIcon.UPLOAD.create());
+            Button uploadBtn = new Button("📦 Upload File", VaadinIcon.UPLOAD.create());
             uploadBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS);
             uploadBtn.addClickListener(e -> 
                 getUI().ifPresent(ui -> ui.navigate("chunked-upload"))
             );
             
-            Button logoutBtn = new Button("Logout", VaadinIcon.SIGN_OUT.create());
-            logoutBtn.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
-            logoutBtn.addClickListener(e -> authenticationContext.logout());
-            
-            HorizontalLayout buttonLayout = new HorizontalLayout(backToRolesBtn, uploadBtn, logoutBtn);
+            HorizontalLayout buttonLayout = new HorizontalLayout(backToRolesBtn, uploadBtn);
             buttonLayout.setJustifyContentMode(JustifyContentMode.CENTER);
             buttonLayout.setSpacing(true);
             

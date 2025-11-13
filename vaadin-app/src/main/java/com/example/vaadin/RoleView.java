@@ -3,6 +3,7 @@ package com.example.vaadin;
 import com.example.common.dto.RoleDTO;
 import com.example.common.dto.RoleTableDTO;
 import com.example.common.dto.UserRolesDTO;
+import com.example.vaadin.layout.RoleSelectionLayout;
 import com.example.vaadin.service.ActiveRoleService;
 import com.example.vaadin.service.RolesService;
 import com.vaadin.flow.component.button.Button;
@@ -31,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@Route("")
+@Route(value = "", layout = RoleSelectionLayout.class)
 @AnonymousAllowed
 public class RoleView extends VerticalLayout implements BeforeEnterObserver {
 
@@ -200,9 +201,9 @@ public class RoleView extends VerticalLayout implements BeforeEnterObserver {
             Button selectRoleBtn = new Button("Seleziona Ruolo", VaadinIcon.CHECK.create());
             selectRoleBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
             selectRoleBtn.addClickListener(e -> {
-                // Naviga alla pagina di conferma passando il ruolo e la descrizione
-                String parameter = roleTableDTO.getRoleName() + "|" + roleTableDTO.getRoleDescription();
-                getUI().ifPresent(ui -> ui.navigate("role-confirmation/" + parameter));
+                // Imposta il ruolo attivo e naviga alla home
+                activeRoleService.setActiveRole(roleTableDTO.getRoleName(), roleTableDTO.getRoleDescription());
+                getUI().ifPresent(ui -> ui.navigate("home"));
             });
             return selectRoleBtn;
         }))
@@ -222,23 +223,7 @@ public class RoleView extends VerticalLayout implements BeforeEnterObserver {
         loadRolesBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         loadRolesBtn.addClickListener(e -> loadUserRolesTable(grid, noDataMessage));
         
-        Button fileUploadBtn = new Button("📦 Upload File", VaadinIcon.UPLOAD.create());
-        fileUploadBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS);
-        fileUploadBtn.addClickListener(e -> 
-            getUI().ifPresent(ui -> ui.navigate("chunked-upload"))
-        );
-        
-        Button simpleStreamingBtn = new Button("⚡ Simple Streaming", VaadinIcon.CLOUD_UPLOAD.create());
-        simpleStreamingBtn.addThemeVariants(ButtonVariant.LUMO_SUCCESS, ButtonVariant.LUMO_PRIMARY);
-        simpleStreamingBtn.addClickListener(e -> 
-            getUI().ifPresent(ui -> ui.navigate("simple-streaming-upload"))
-        );
-        
-        Button logoutBtn = new Button("Logout", VaadinIcon.SIGN_OUT.create());
-        logoutBtn.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
-        logoutBtn.addClickListener(e -> authenticationContext.logout());
-        
-        HorizontalLayout buttonLayout = new HorizontalLayout(loadRolesBtn, fileUploadBtn, simpleStreamingBtn, logoutBtn);
+        HorizontalLayout buttonLayout = new HorizontalLayout(loadRolesBtn);
         rolesCard.add(rolesTitle, noDataMessage, grid, buttonLayout);
         
         add(welcomeCard, rolesCard);

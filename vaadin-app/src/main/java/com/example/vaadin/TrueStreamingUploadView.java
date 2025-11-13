@@ -1,5 +1,6 @@
 package com.example.vaadin;
 
+import com.example.vaadin.layout.MainLayout;
 import com.example.vaadin.service.FileStreamingService;
 import com.example.vaadin.upload.StreamingReceiver;
 import com.vaadin.flow.component.UI;
@@ -45,7 +46,7 @@ import org.slf4j.LoggerFactory;
  * 
  * Best for files: 10MB - 2GB
  */
-@Route("true-streaming")
+@Route(value = "true-streaming", layout = MainLayout.class)
 @PageTitle("True Streaming Upload")
 @jakarta.annotation.security.PermitAll
 public class TrueStreamingUploadView extends VerticalLayout {

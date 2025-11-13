@@ -1,5 +1,6 @@
 package com.example.vaadin;
 
+import com.example.vaadin.layout.MainLayout;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.html.*;
@@ -36,7 +37,7 @@ import jakarta.annotation.security.PermitAll;
  * 4. Server assembles chunks into final file
  * 5. Memory usage: Only 10MB chunk at a time!
  */
-@Route("chunked-upload")
+@Route(value = "chunked-upload", layout = MainLayout.class)
 @PageTitle("Chunked File Upload (Large Files)")
 @PermitAll
 public class ChunkedFileUploadView extends VerticalLayout {

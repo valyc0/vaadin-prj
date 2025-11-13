@@ -59,6 +59,7 @@ public class SecurityConfig extends VaadinWebSecurity {
 
         // Configure OIDC logout with Keycloak
         http.logout(logout -> logout
+            .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "GET"))
             .logoutSuccessHandler(oidcLogoutSuccessHandler())
             .invalidateHttpSession(true)
             .clearAuthentication(true)

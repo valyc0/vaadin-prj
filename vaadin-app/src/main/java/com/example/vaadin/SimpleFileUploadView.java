@@ -1,5 +1,6 @@
 package com.example.vaadin;
 
+import com.example.vaadin.layout.MainLayout;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.html.*;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
@@ -25,7 +26,7 @@ import com.vaadin.flow.server.auth.AnonymousAllowed;
  * 
  * Use case: Quick uploads of files < 1GB
  */
-@Route("simple-upload")
+@Route(value = "simple-upload", layout = MainLayout.class)
 @PageTitle("Simple File Upload")
 @jakarta.annotation.security.PermitAll
 public class SimpleFileUploadView extends VerticalLayout {
