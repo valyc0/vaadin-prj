@@ -36,7 +36,7 @@ public class FileDownloadController {
 
     /**
      * Endpoint per il download in streaming di un file.
-     * Ottiene lo stream dal service e lo scrive nella response.
+     * Delega al service che gestisce tutto lo streaming.
      * 
      * @param fileName nome del file da scaricare (URL encoded)
      * @param request richiesta HTTP
@@ -56,18 +56,8 @@ public class FileDownloadController {
             // Ri-encode per la chiamata al backend
             String encodedFileName = java.net.URLEncoder.encode(decodedFileName, StandardCharsets.UTF_8);
             
-            // Ottieni lo stream e i metadata dal service
-            FileDownloadProxyService.DownloadResult downloadResult = 
-                fileDownloadProxyService.getFileStream(decodedFileName, encodedFileName);
-            
-            // Configura gli header della response
-            configureResponseHeaders(response, downloadResult);
-            
-            // Disabilita il buffering per un vero streaming
-            response.setBufferSize(BUFFER_SIZE);
-            
-            // Streaming dei dati dal backend al browser
-            streamToResponse(downloadResult.getInputStream(), response.getOutputStream(), decodedFileName);
+            // Delega al service - lo streaming avviene tutto dentro il service
+            fileDownloadProxyService.streamFileToResponse(decodedFileName, encodedFileName, response);
             
             logger.info("Download completed successfully for file: {}", decodedFileName);
             
@@ -82,70 +72,6 @@ public class FileDownloadController {
             logger.error("Error downloading file: {}", fileName, e);
             sendError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, 
                      "Error downloading file: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Configura gli header della response HTTP in base ai metadata ricevuti dal service
-     */
-    private void configureResponseHeaders(HttpServletResponse response, 
-                                         FileDownloadProxyService.DownloadResult downloadResult) {
-        
-        // Content-Type
-        String contentType = downloadResult.getHeader(HttpHeaders.CONTENT_TYPE);
-        if (contentType != null) {
-            response.setContentType(contentType);
-        } else {
-            response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
-        }
-        
-        // Content-Length
-        String contentLength = downloadResult.getHeader(HttpHeaders.CONTENT_LENGTH);
-        if (contentLength != null) {
-            try {
-                response.setContentLengthLong(Long.parseLong(contentLength));
-            } catch (NumberFormatException e) {
-                logger.warn("Invalid Content-Length header: {}", contentLength);
-            }
-        }
-        
-        // Content-Disposition
-        String contentDisposition = downloadResult.getHeader(HttpHeaders.CONTENT_DISPOSITION);
-        if (contentDisposition != null) {
-            response.setHeader(HttpHeaders.CONTENT_DISPOSITION, contentDisposition);
-        }
-    }
-
-    /**
-     * Trasferisce i dati dallo stream di input alla response in chunk,
-     * implementando un vero streaming senza caricamento in memoria.
-     */
-    private void streamToResponse(InputStream inputStream, OutputStream outputStream, String fileName) 
-            throws Exception {
-        
-        try (inputStream; outputStream) {
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesRead;
-            long totalBytesStreamed = 0;
-            
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-                outputStream.flush(); // Flush immediato per streaming vero
-                totalBytesStreamed += bytesRead;
-                
-                // Log ogni 10MB per monitorare il progresso
-                if (totalBytesStreamed % (10 * 1024 * 1024) == 0) {
-                    logger.debug("Streamed {} MB for file: {}", 
-                               totalBytesStreamed / (1024 * 1024), fileName);
-                }
-            }
-            
-            logger.info("Successfully streamed {} bytes for file: {}", 
-                      totalBytesStreamed, fileName);
-            
-        } catch (Exception e) {
-            logger.error("Error during streaming for file: " + fileName, e);
-            throw new RuntimeException("Streaming failed for file: " + fileName, e);
         }
     }
 
