@@ -1,26 +1,25 @@
 package com.example.vaadin.service;
 
-import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Service per gestire il download in streaming dei file dal roles-service.
- * Funziona come proxy trasparente, trasferendo i dati in chunk senza caricarli in memoria.
+ * Restituisce lo stream e i metadata, lasciando al controller la gestione della HttpServletResponse.
  */
 @Service
 public class FileDownloadProxyService {
 
     private static final Logger logger = LoggerFactory.getLogger(FileDownloadProxyService.class);
-    private static final int BUFFER_SIZE = 8192; // 8KB buffer per lo streaming
     
     private final FileStreamingService fileStreamingService;
     private final RestClient restClient;
@@ -31,18 +30,42 @@ public class FileDownloadProxyService {
     }
 
     /**
-     * Scarica un file dal roles-service e lo scrive direttamente nella HttpServletResponse
-     * in modalità streaming, senza caricarlo in memoria.
+     * Risultato del download contenente lo stream e i metadata HTTP
+     */
+    public static class DownloadResult {
+        private final InputStream inputStream;
+        private final Map<String, String> headers;
+        
+        public DownloadResult(InputStream inputStream, Map<String, String> headers) {
+            this.inputStream = inputStream;
+            this.headers = headers;
+        }
+        
+        public InputStream getInputStream() {
+            return inputStream;
+        }
+        
+        public Map<String, String> getHeaders() {
+            return headers;
+        }
+        
+        public String getHeader(String name) {
+            return headers.get(name);
+        }
+    }
+
+    /**
+     * Ottiene lo stream del file dal roles-service insieme ai suoi metadata HTTP.
+     * Il controller sarà responsabile di scrivere lo stream nella response.
      * 
      * @param fileName nome del file da scaricare (già decodificato)
      * @param encodedFileName nome del file URL encoded per la richiesta HTTP
-     * @param response HttpServletResponse dove scrivere lo stream
-     * @throws Exception in caso di errori durante il download o lo streaming
+     * @return DownloadResult contenente lo stream e gli header HTTP
+     * @throws Exception in caso di errori durante il download
      */
-    public void streamFileDownload(String fileName, String encodedFileName, HttpServletResponse response) 
-            throws Exception {
+    public DownloadResult getFileStream(String fileName, String encodedFileName) throws Exception {
         
-        logger.info("Starting proxy streaming for file: {}", fileName);
+        logger.info("Requesting file stream for: {}", fileName);
         
         // Ottieni il token JWT dalla sessione
         String jwtToken = fileStreamingService.getJwtToken();
@@ -56,10 +79,10 @@ public class FileDownloadProxyService {
         String rolesServiceUrl = fileStreamingService.getRolesServiceUrl() + 
                                 "/api/files/download/" + encodedFileName;
         
-        logger.debug("Proxying streaming request to: {}", rolesServiceUrl);
+        logger.debug("Requesting stream from: {}", rolesServiceUrl);
         
-        // Effettua la richiesta al roles-service e gestisci lo streaming
-        restClient.method(HttpMethod.GET)
+        // Effettua la richiesta al roles-service e restituisci lo stream
+        return restClient.method(HttpMethod.GET)
             .uri(rolesServiceUrl)
             .header("Authorization", "Bearer " + jwtToken)
             .exchange((clientRequest, clientResponse) -> {
@@ -71,87 +94,45 @@ public class FileDownloadProxyService {
                     throw new RuntimeException("Backend returned status: " + statusCode);
                 }
                 
-                // Copia gli header importanti dalla risposta del backend
-                copyResponseHeaders(clientResponse, response, fileName);
+                // Estrai gli header rilevanti
+                Map<String, String> headers = extractHeaders(clientResponse.getHeaders(), fileName);
                 
-                // Disabilita il buffering per un vero streaming
-                response.setBufferSize(BUFFER_SIZE);
+                // Restituisci lo stream e i metadata
+                InputStream inputStream = clientResponse.getBody();
                 
-                // Streaming dei dati dal backend al browser
-                streamData(clientResponse.getBody(), response.getOutputStream(), fileName);
+                logger.info("Stream obtained successfully for file: {}", fileName);
                 
-                return null;
+                return new DownloadResult(inputStream, headers);
             });
     }
 
     /**
-     * Copia gli header rilevanti dalla risposta del backend alla risposta HTTP
+     * Estrae gli header HTTP rilevanti dalla risposta del backend
      */
-    private void copyResponseHeaders(
-            org.springframework.http.client.ClientHttpResponse clientResponse,
-            HttpServletResponse response,
-            String fileName) {
+    private Map<String, String> extractHeaders(HttpHeaders httpHeaders, String fileName) {
+        Map<String, String> headers = new HashMap<>();
         
-        String contentType = clientResponse.getHeaders().getFirst("Content-Type");
-        String contentLength = clientResponse.getHeaders().getFirst("Content-Length");
-        String contentDisposition = clientResponse.getHeaders().getFirst("Content-Disposition");
+        String contentType = httpHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
+        String contentLength = httpHeaders.getFirst(HttpHeaders.CONTENT_LENGTH);
+        String contentDisposition = httpHeaders.getFirst(HttpHeaders.CONTENT_DISPOSITION);
         
-        // Imposta Content-Type
         if (contentType != null) {
-            response.setContentType(contentType);
-        } else {
-            response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
+            headers.put(HttpHeaders.CONTENT_TYPE, contentType);
         }
         
-        // Imposta Content-Length se disponibile
         if (contentLength != null) {
-            try {
-                response.setContentLengthLong(Long.parseLong(contentLength));
-            } catch (NumberFormatException e) {
-                logger.warn("Invalid Content-Length header: {}", contentLength);
-            }
+            headers.put(HttpHeaders.CONTENT_LENGTH, contentLength);
         }
         
-        // Imposta Content-Disposition
         if (contentDisposition != null) {
-            response.setHeader("Content-Disposition", contentDisposition);
+            headers.put(HttpHeaders.CONTENT_DISPOSITION, contentDisposition);
         } else {
-            // Crea un header Content-Disposition sicuro
+            // Crea un Content-Disposition sicuro se non presente
             String safeFileName = fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
-            response.setHeader("Content-Disposition", 
-                             "attachment; filename=\"" + safeFileName + "\"");
+            headers.put(HttpHeaders.CONTENT_DISPOSITION, 
+                       "attachment; filename=\"" + safeFileName + "\"");
         }
-    }
-
-    /**
-     * Trasferisce i dati dallo stream di input allo stream di output in chunk,
-     * implementando un vero streaming senza caricamento in memoria.
-     */
-    private void streamData(InputStream inputStream, OutputStream outputStream, String fileName) {
         
-        try (inputStream; outputStream) {
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesRead;
-            long totalBytesStreamed = 0;
-            
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-                outputStream.flush(); // Flush immediato per streaming vero
-                totalBytesStreamed += bytesRead;
-                
-                // Log ogni 10MB per monitorare il progresso
-                if (totalBytesStreamed % (10 * 1024 * 1024) == 0) {
-                    logger.debug("Streamed {} MB for file: {}", 
-                               totalBytesStreamed / (1024 * 1024), fileName);
-                }
-            }
-            
-            logger.info("Successfully completed streaming of {} bytes for file: {}", 
-                      totalBytesStreamed, fileName);
-            
-        } catch (Exception e) {
-            logger.error("Error during streaming for file: " + fileName, e);
-            throw new RuntimeException("Streaming failed for file: " + fileName, e);
-        }
+        return headers;
     }
 }
