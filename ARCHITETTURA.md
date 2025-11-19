@@ -2,7 +2,7 @@
 
 ## Panoramica
 
-Progetto ristrutturato con architettura **Maven multi-modulo** per migliorare:
+Progetto ristrutturato con architettura **Maven multi-modulo** per migliorare1:
 - Separazione delle responsabilità
 - Riutilizzabilità del codice
 - Manutenibilità
