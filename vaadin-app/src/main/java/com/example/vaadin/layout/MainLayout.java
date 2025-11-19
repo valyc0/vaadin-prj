@@ -47,7 +47,8 @@ public class MainLayout extends BaseLayout {
         menu.add(
             createMenuLink("🏠 Home", "home", VaadinIcon.DASHBOARD),
             createMenuLink("🎭 Seleziona Ruolo", "", VaadinIcon.USER_CARD),
-            createMenuLink("📦 Upload File", "chunked-upload", VaadinIcon.UPLOAD),
+            createMenuLink("� File Manager", "files", VaadinIcon.FOLDER_OPEN),
+            createMenuLink("�📦 Upload File", "chunked-upload", VaadinIcon.UPLOAD),
             createMenuLink("📄 File Upload Semplice", "simple-upload", VaadinIcon.FILE_ADD),
             createMenuLink("🌊 Streaming Upload", "true-streaming", VaadinIcon.CLOUD_UPLOAD)
         );

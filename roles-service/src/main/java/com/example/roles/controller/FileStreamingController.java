@@ -228,10 +228,15 @@ public class FileStreamingController {
             InputStream inputStream = minioService.downloadFileStreaming(filename);
             StatObjectResponse metadata = minioService.getFileMetadata(filename);
 
+            // Use InputStreamResource for true streaming
+            org.springframework.core.io.InputStreamResource resource = 
+                new org.springframework.core.io.InputStreamResource(inputStream);
+
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(metadata.contentType()))
+                    .contentLength(metadata.size())
                     .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
-                    .body(inputStream.readAllBytes()); // For streaming, consider using StreamingResponseBody
+                    .body(resource);
 
         } catch (Exception e) {
             logger.error("Error downloading file '{}'", filename, e);

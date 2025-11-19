@@ -62,9 +62,9 @@ public class FileStreamingService {
     }
 
     /**
-     * Get JWT token from current authenticated user
+     * Get JWT token from current authenticated user (internal method)
      */
-    private String getJwtToken() {
+    private String getJwtTokenInternal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -91,6 +91,20 @@ public class FileStreamingService {
             logger.error("Failed to retrieve access token", e);
             return null;
         }
+    }
+
+    /**
+     * Get JWT token (public method for UI components)
+     */
+    public String getJwtToken() {
+        return getJwtTokenInternal();
+    }
+
+    /**
+     * Get roles service URL (public method for UI components)
+     */
+    public String getRolesServiceUrl() {
+        return rolesServiceUrl;
     }
 
     /**
@@ -135,7 +149,7 @@ public class FileStreamingService {
         logger.info("   Direct streaming - NO Flux conversion, NO memory buffering!");
 
         // Get JWT token
-        String jwtToken = getJwtToken();
+        String jwtToken = getJwtTokenInternal();
         if (jwtToken != null) {
             logger.info("🔑 JWT token added to request");
         }
@@ -221,7 +235,7 @@ public class FileStreamingService {
      * List files from roles-service
      */
     public String[] listFiles() {
-        String jwtToken = getJwtToken();
+        String jwtToken = getJwtTokenInternal();
         
         return restClient.get()
                 .uri(rolesServiceUrl + "/api/files/list")
@@ -238,7 +252,7 @@ public class FileStreamingService {
      * Get file metadata from roles-service
      */
     public Map<String, Object> getFileMetadata(String filename) {
-        String jwtToken = getJwtToken();
+        String jwtToken = getJwtTokenInternal();
         
         return restClient.get()
                 .uri(rolesServiceUrl + "/api/files/metadata/" + filename)
@@ -255,7 +269,7 @@ public class FileStreamingService {
      * Delete file from roles-service
      */
     public Map<String, Object> deleteFile(String filename) {
-        String jwtToken = getJwtToken();
+        String jwtToken = getJwtTokenInternal();
         
         return restClient.delete()
                 .uri(rolesServiceUrl + "/api/files/" + filename)
@@ -285,7 +299,7 @@ public class FileStreamingService {
                 logger.info("→ Forwarding chunk {}/{} to roles-service", chunkIndex + 1, totalChunks);
                 
                 // Get JWT token
-                String jwtToken = getJwtToken();
+                String jwtToken = getJwtTokenInternal();
                 
                 // For RestClient with multipart, we need to use MultiValueMap
                 org.springframework.util.LinkedMultiValueMap<String, Object> parts = 
@@ -341,7 +355,7 @@ public class FileStreamingService {
                 );
 
                 // Get JWT token
-                String jwtToken = getJwtToken();
+                String jwtToken = getJwtTokenInternal();
                 
                 Map<String, Object> result = restClient.post()
                         .uri(rolesServiceUrl + "/api/files/finalize-upload")
